@@ -184,8 +184,8 @@ export function decomposeLayoutSkeleton(snapshot: UiReferenceSnapshot): LayoutSk
       parseNumericPx(current.computedStyles['min-height']) ??
       parseNumericPx(current.computedStyles['height']);
 
-    const minWidthPx = isInteractive ? Math.max(44, explicitMinW ?? 44) : explicitMinW;
-    const minHeightPx = isInteractive ? Math.max(44, explicitMinH ?? 44) : explicitMinH;
+    const minWidthPx = explicitMinW ?? (isInteractive ? 44 : undefined);
+    const minHeightPx = explicitMinH ?? (isInteractive ? 44 : undefined);
 
     const responsiveRules = extractResponsiveRules(current.computedStyles);
     allBreakpoints.push(...responsiveRules);

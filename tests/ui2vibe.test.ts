@@ -209,7 +209,7 @@ describe('@kr-pro-labs/ui2vibe-mcp Core Pipeline & Edge Cases', () => {
     expect(audit.clsLayoutStable).toBe(true);
     expect(audit.zeroExternalDepsVerified).toBe(true);
 
-    // Edge case: low-contrast snippet (#94a3b8 text on #cbd5e1 background)
+    // Edge case: low-contrast snippet (#94a3b8 text on #cbd5e1 background) and undersized 24x24px button
     const lowContrastSnap = captureUiReference({
       markup: `<div style="background-color: #cbd5e1; color: #94a3b8;"><button style="width: 24px; height: 24px;">Tiny</button></div>`
     });
@@ -220,11 +220,66 @@ describe('@kr-pro-labs/ui2vibe-mcp Core Pipeline & Edge Cases', () => {
     const lowAudit = auditUiFidelity(lowTokens, lowLayout, lowMotion, lowSynth);
 
     expect(lowAudit.allContrastPassesAA).toBe(false);
-    expect(lowAudit.fidelityScore).toBeLessThan(100);
-    expect(lowAudit.recommendations.length).toBeGreaterThan(0);
+    expect(lowAudit.allTouchTargetsPass).toBe(false);
+    expect(lowAudit.touchTargetAudits[0]?.widthPx).toBe(24);
+    expect(lowAudit.touchTargetAudits[0]?.heightPx).toBe(24);
+    expect(lowAudit.fidelityScore).toBeLessThan(80);
+    expect(lowAudit.recommendations.length).toBeGreaterThanOrEqual(2);
   });
 
-  it('7. executes all 6 MCP tools, 2 MCP resources, and rejects invalid tool/resource requests', () => {
+  it('7. handles JSX arrow function props, oklch() / shorthand / Tailwind alpha colors, @media (min-width), and react-css-vars synthesis', () => {
+    const jsxSnap = captureUiReference({
+      markup: `<div className="bg-white/10 backdrop-blur-md p-4"><button onClick={() => fireEvent()} data-config={{ retry: 2 }} className="bg-indigo-600 text-white min-w-[48px] min-h-[48px]">Execute</button></div>`,
+      css: `
+        .panel {
+          display: flex;
+          flex-direction: column;
+          padding: 8px 24px;
+          border: 1px solid #334155;
+          color: oklch(0.95 0.02 250);
+          animation: fadeSlide 650ms ease-out both;
+        }
+        @media (min-width: 768px) {
+          .panel {
+            flex-direction: row;
+          }
+        }
+        @keyframes fadeSlide {
+          0% { opacity: 0; transform: translateY(8px); }
+          100% { opacity: 1; transform: translateY(0); }
+        }
+      `
+    });
+
+    const btnNode = jsxSnap.flatNodes.find((n) => n.tag === 'button');
+    expect(btnNode).toBeDefined();
+    expect(btnNode?.classes).toContain('bg-indigo-600');
+    expect(btnNode?.attributes['onClick']).toContain('=>');
+    expect(jsxSnap.rawCssRules['.panel']?.['flex-direction']).toBe('column');
+    expect(jsxSnap.rawCssRules['.panel']?.['@media-md-flex-direction']).toBe('row');
+
+    const tokens = extractDesignTokens(jsxSnap);
+    expect(tokens.colors.some((c) => c.role === 'glass')).toBe(true);
+    expect(tokens.colors.some((c) => c.role === 'border' && c.hex === '#334155')).toBe(true);
+    expect(tokens.spacing.some((s) => s.quantized8ptPx === 8)).toBe(true);
+    expect(tokens.spacing.some((s) => s.quantized8ptPx === 24)).toBe(true);
+
+    const motion = extractMotionPhysics(jsxSnap);
+    const kfSpec = motion.keyframes.find((k) => k.name === 'fadeSlide');
+    expect(kfSpec?.durationMs).toBe(650);
+
+    const layout = decomposeLayoutSkeleton(jsxSnap);
+    const synthCssVars = synthesizeVibeComponent(jsxSnap, tokens, layout, motion, {
+      targetFramework: 'react-css-vars',
+      includeDarkTheme: false,
+      componentName: 'CssVarsPanel'
+    });
+    expect(synthCssVars.targetFramework).toBe('react-css-vars');
+    expect(synthCssVars.componentCode).toContain('vibe-react-vars');
+    expect(synthCssVars.themeCssVariables).not.toContain('.dark, [data-theme="dark"]');
+  });
+
+  it('8. executes all 6 MCP tools, 2 MCP resources, and rejects invalid tool/resource requests', () => {
     const server = createUi2VibeServer();
     expect(server).toBeDefined();
 

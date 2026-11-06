@@ -108,11 +108,26 @@ export function synthesizeVibeComponent(
     tokens.colors.find((c) => c.role === 'accent') ??
     tokens.colors[0]!;
 
+  const includeDarkTheme = options.includeDarkTheme !== false;
   const primaryMotion = motion.motions[0]!;
   const keyframeBlocks = motion.keyframes.map((k) => k.cssKeyframeBlock).join('\n\n');
 
+  const baseCssVarsBlock = includeDarkTheme
+    ? tokens.cssVariablesBlock
+    : tokens.cssVariablesBlock.split('\n\n.dark')[0] ?? tokens.cssVariablesBlock;
+
+  const darkActiveBlock = includeDarkTheme
+    ? [
+        '.dark, [data-theme="dark"] {',
+        `  --color-surface-active: ${bgToken.darkCounterpartHex};`,
+        `  --color-text-active: ${fgToken.darkCounterpartHex};`,
+        `  --color-accent: ${accentToken.darkCounterpartHex};`,
+        '}'
+      ].join('\n')
+    : '';
+
   const themeCssVariables = [
-    tokens.cssVariablesBlock,
+    baseCssVarsBlock,
     ':root {',
     `  --color-surface-active: ${bgToken.hex};`,
     `  --color-text-active: ${fgToken.hex};`,
@@ -120,11 +135,7 @@ export function synthesizeVibeComponent(
     `  --motion-duration: ${primaryMotion.durationMs}ms;`,
     `  --motion-easing: ${primaryMotion.easingCss};`,
     '}',
-    '.dark, [data-theme="dark"] {',
-    `  --color-surface-active: ${bgToken.darkCounterpartHex};`,
-    `  --color-text-active: ${fgToken.darkCounterpartHex};`,
-    `  --color-accent: ${accentToken.darkCounterpartHex};`,
-    '}',
+    darkActiveBlock,
     keyframeBlocks,
     motion.reducedMotionCssFallback
   ]
@@ -171,10 +182,19 @@ export function synthesizeVibeComponent(
   let componentCode = '';
 
   if (targetFramework === 'react-tailwind' || targetFramework === 'react-css-vars') {
+    const isCssVarsOnly = targetFramework === 'react-css-vars';
     const childJsx =
       layout.root.children.length > 0
         ? renderChildrenJsx(layout.root.children, 6)
-        : `      <div className="space-y-2">\n        <h2 className="text-lg font-semibold">${layout.root.textContent || componentName}</h2>\n      </div>\n      <button\n        type="button"\n        disabled={isLoading}\n        onClick={onAction}\n        className="inline-flex items-center justify-center min-w-[44px] min-h-[44px] px-4 py-2 rounded-xl font-medium transition-all focus-visible:outline-2 focus-visible:outline-offset-2 active:scale-95"\n        style={{ backgroundColor: 'var(--color-accent)', color: '#ffffff' }}\n      >\n        {isLoading ? 'Loading...' : 'Trigger Action'}\n      </button>`;
+        : `      <div>\n        <h2>${layout.root.textContent || componentName}</h2>\n      </div>\n      <button\n        type="button"\n        disabled={isLoading}\n        onClick={onAction}\n        className="inline-flex items-center justify-center min-w-[44px] min-h-[44px] px-4 py-2 rounded-xl font-medium transition-all focus-visible:outline-2 focus-visible:outline-offset-2 active:scale-95"\n        style={{ backgroundColor: 'var(--color-accent)', color: '#ffffff', minWidth: '44px', minHeight: '44px' }}\n      >\n        {isLoading ? 'Loading...' : 'Trigger Action'}\n      </button>`;
+
+    const rootClassAttr = isCssVarsOnly
+      ? `className="vibe-react-vars motion-reduce:transition-none"`
+      : `className="${layoutClass} p-6 rounded-xl border transition-all motion-reduce:transition-none"`;
+
+    const extraCssVarsStyle = isCssVarsOnly
+      ? `\n        display: '${layout.root.layoutMode}',\n        flexDirection: '${layout.root.flexDirection ?? 'column'}',\n        gap: 'var(--${tokens.spacing[0]?.name ?? 'space-16'}, 16px)',\n        padding: '24px',\n        borderRadius: 'var(--${tokens.radii[0]?.name ?? 'radius-12'}, 12px)',`
+      : '';
 
     componentCode = `import React, { useState } from 'react';
 
@@ -186,7 +206,7 @@ export interface ${componentName}Props {
 }
 
 /**
- * Synthesized by @kr-pro-labs/ui2vibe-mcp
+ * Synthesized by @kr-pro-labs/ui2vibe-mcp (${targetFramework})
  * Spring Physics Approximation: stiffness=${primaryMotion.springApproximation.stiffness}, damping=${primaryMotion.springApproximation.damping}, mass=${primaryMotion.springApproximation.mass}
  */
 export function ${componentName}({
@@ -203,8 +223,8 @@ export function ${componentName}({
       data-theme={darkMode ? 'dark' : 'light'}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
-      className="${layoutClass} p-6 rounded-xl border transition-all motion-reduce:transition-none"
-      style={{
+      ${rootClassAttr}
+      style={{${extraCssVarsStyle}
         backgroundColor: 'var(--color-surface-active, ${bgToken.hex})',
         color: 'var(--color-text-active, ${fgToken.hex})',
         transitionDuration: 'var(--motion-duration, ${primaryMotion.durationMs}ms)',

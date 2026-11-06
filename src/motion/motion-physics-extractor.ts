@@ -144,12 +144,45 @@ function parseDurationMs(raw: string | undefined): number {
 export function extractMotionPhysics(snapshot: UiReferenceSnapshot): MotionPhysicsReport {
   const motions: MotionSpec[] = [];
   const keyframes: KeyframeAnimationSpec[] = [];
+  const seenMotionKeys = new Set<string>();
+  const animationOverrides = new Map<string, { durationMs: number; easingCss: string }>();
   let motionCount = 0;
 
   const inspectDeclarations = (
     decls: Record<string, string>,
     trigger: MotionSpec['trigger']
   ): void => {
+    const animShorthand = decls['animation'];
+    const animName = decls['animation-name'];
+    const animDuration = decls['animation-duration'];
+    const animEasing = decls['animation-timing-function'];
+    if (animShorthand || animName) {
+      const targetName =
+        animName?.trim() ??
+        animShorthand
+          ?.split(/\s+/)
+          .find(
+            (tok) =>
+              !/^[0-9]/.test(tok) &&
+              !tok.startsWith('cubic-bezier') &&
+              !NAMED_BEZIER_MAP[tok] &&
+              !['infinite', 'both', 'forwards', 'backwards', 'alternate', 'normal', 'reverse'].includes(tok)
+          );
+      if (targetName) {
+        const durToken = animDuration ?? animShorthand?.match(/\b([0-9.]+m?s)\b/)?.[1];
+        const bezierToken =
+          animEasing ??
+          animShorthand?.match(/cubic-bezier\([^)]+\)/)?.[0] ??
+          Object.keys(NAMED_BEZIER_MAP).find((named) =>
+            new RegExp(`\\b${named}\\b`).test(animShorthand ?? '')
+          );
+        animationOverrides.set(targetName, {
+          durationMs: durToken ? parseDurationMs(durToken) : 400,
+          easingCss: bezierToken ?? 'cubic-bezier(0.16, 1, 0.3, 1)'
+        });
+      }
+    }
+
     const transitionShorthand = decls['transition'];
     const transitionProp = decls['transition-property'];
     const transitionDuration = decls['transition-duration'];
@@ -157,7 +190,6 @@ export function extractMotionPhysics(snapshot: UiReferenceSnapshot): MotionPhysi
     const hasTransform = Boolean(decls['transform']);
 
     if (transitionShorthand || transitionProp || transitionDuration || hasTransform) {
-      motionCount += 1;
       let property = transitionProp ?? 'all';
       let durationMs = parseDurationMs(transitionDuration);
       let easingCss = transitionEasing ?? 'cubic-bezier(0.22, 1, 0.36, 1)';
@@ -190,16 +222,21 @@ export function extractMotionPhysics(snapshot: UiReferenceSnapshot): MotionPhysi
         ? easingCss
         : `cubic-bezier(${bezier.join(', ')})`;
 
-      motions.push({
-        id: `motion-${motionCount}`,
-        trigger,
-        property,
-        durationMs,
-        easingCss: normalizedEasing,
-        bezierControlPoints: bezier,
-        springApproximation: spring,
-        cssRule: `transition: ${property} ${durationMs}ms ${normalizedEasing};`
-      });
+      const dedupeKey = `${trigger}|${property}|${durationMs}|${normalizedEasing}`;
+      if (!seenMotionKeys.has(dedupeKey)) {
+        seenMotionKeys.add(dedupeKey);
+        motionCount += 1;
+        motions.push({
+          id: `motion-${motionCount}`,
+          trigger,
+          property,
+          durationMs,
+          easingCss: normalizedEasing,
+          bezierControlPoints: bezier,
+          springApproximation: spring,
+          cssRule: `transition: ${property} ${durationMs}ms ${normalizedEasing};`
+        });
+      }
     }
   };
 
@@ -227,26 +264,33 @@ export function extractMotionPhysics(snapshot: UiReferenceSnapshot): MotionPhysi
         .join(' ');
       stepLines.push(`  ${stepSelector} { ${pairs} }`);
     }
+    const override = animationOverrides.get(kfName);
+    const kfDuration = override?.durationMs ?? 400;
+    const rawEasing = override?.easingCss ?? 'cubic-bezier(0.16, 1, 0.3, 1)';
+    const bezier = parseCubicBezier(rawEasing);
+    const normalizedEasing = rawEasing.startsWith('cubic-bezier')
+      ? rawEasing
+      : `cubic-bezier(${bezier.join(', ')})`;
+
     const cssKeyframeBlock = `@keyframes ${kfName} {\n${stepLines.join('\n')}\n}`;
     keyframes.push({
       name: kfName,
-      durationMs: 400,
-      easingCss: 'cubic-bezier(0.16, 1, 0.3, 1)',
+      durationMs: kfDuration,
+      easingCss: normalizedEasing,
       steps,
       cssKeyframeBlock
     });
 
     motionCount += 1;
-    const bezier: [number, number, number, number] = [0.16, 1, 0.3, 1];
     motions.push({
       id: `motion-${motionCount}`,
       trigger: 'keyframe',
       property: kfName,
-      durationMs: 400,
-      easingCss: 'cubic-bezier(0.16, 1, 0.3, 1)',
+      durationMs: kfDuration,
+      easingCss: normalizedEasing,
       bezierControlPoints: bezier,
-      springApproximation: solveSpringFromCubicBezier(bezier, 400),
-      cssRule: `animation: ${kfName} 400ms cubic-bezier(0.16, 1, 0.3, 1) both;`
+      springApproximation: solveSpringFromCubicBezier(bezier, kfDuration),
+      cssRule: `animation: ${kfName} ${kfDuration}ms ${normalizedEasing} both;`
     });
   }
 

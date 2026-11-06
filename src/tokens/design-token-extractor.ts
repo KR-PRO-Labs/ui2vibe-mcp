@@ -114,7 +114,42 @@ export function parseCssColorToRgba(raw: string): RgbaColor | null {
     };
   }
 
+  const oklchMatch = target.match(
+    /^oklch\(\s*([0-9.]+%?)\s+([0-9.]+)\s+([0-9.]+)(?:deg)?(?:\s*\/\s*([0-9.]+%?))?\s*\)$/
+  );
+  if (oklchMatch) {
+    const rawL = oklchMatch[1] ?? '0';
+    const l = rawL.endsWith('%') ? Number(rawL.slice(0, -1)) / 100 : Number(rawL);
+    const c = Number(oklchMatch[2]);
+    const h = Number(oklchMatch[3]);
+    let a = 1;
+    if (oklchMatch[4] !== undefined) {
+      const rawA = oklchMatch[4];
+      a = rawA.endsWith('%') ? Number(rawA.slice(0, -1)) / 100 : Number(rawA);
+    }
+    const hex = oklchToHex({
+      l: clamp(l, 0, 1),
+      c: clamp(c, 0, 0.4),
+      h: ((h % 360) + 360) % 360,
+      alpha: clamp(Number(a.toFixed(3)), 0, 1)
+    });
+    const parsedHex = parseCssColorToRgba(hex);
+    if (parsedHex) {
+      return { ...parsedHex, a: clamp(Number(a.toFixed(3)), 0, 1) };
+    }
+  }
+
   return null;
+}
+
+function extractColorCandidatesFromCssValue(rawVal: string): string[] {
+  const direct = parseCssColorToRgba(rawVal);
+  if (direct) return [rawVal.trim()];
+
+  const matches = rawVal.match(
+    /#[0-9a-fA-F]{3,8}\b|(?:rgba?|hsla?|oklch)\([^)]+\)/g
+  );
+  return matches ? matches.map((m) => m.trim()) : [];
 }
 
 export function rgbaToHex(rgba: RgbaColor): string {
@@ -295,11 +330,11 @@ function classifyColorRole(
   oklch: OklchColor,
   hasBackdropFilter: boolean
 ): ColorSemanticRole {
-  if (hasBackdropFilter && oklch.alpha < 1) {
+  if (hasBackdropFilter && oklch.alpha < 1 && propName.includes('background')) {
     return 'glass';
   }
   if (propName.includes('border') || propName.includes('outline')) {
-    return 'border';
+    return hasBackdropFilter && oklch.alpha < 1 ? 'glass' : 'border';
   }
   if (propName === 'color') {
     return oklch.c < 0.05 && oklch.l > 0.45 && oklch.l < 0.75 ? 'text-muted' : 'text-primary';
@@ -338,28 +373,33 @@ export function extractDesignTokens(snapshot: UiReferenceSnapshot): DesignTokenS
         prop === 'background-color' ||
         prop === 'background' ||
         prop === 'border-color' ||
-        prop === 'outline-color'
+        prop === 'border' ||
+        prop === 'outline-color' ||
+        prop === 'outline'
       ) {
-        const rgba = parseCssColorToRgba(val);
-        if (rgba) {
-          const hex = rgbaToHex(rgba);
-          const oklch = hexToOklch(val);
-          const role = classifyColorRole(prop, oklch, hasBackdrop);
-          const dedupeKey = `${role}:${hex}`;
-          if (!colorByRoleAndHex.has(dedupeKey)) {
-            colorIndex += 1;
-            const darkOklch = synthesizeDarkCounterpart(oklch, role);
-            const darkHex = oklchToHex(darkOklch);
-            colorByRoleAndHex.set(dedupeKey, {
-              name: `color-${role}-${colorIndex}`,
-              raw: val,
-              hex,
-              oklch,
-              relativeLuminance: computeRelativeLuminance(hex),
-              role,
-              darkCounterpartHex: darkHex,
-              darkCounterpartOklch: darkOklch
-            });
+        const candidates = extractColorCandidatesFromCssValue(val);
+        for (const candidate of candidates) {
+          const rgba = parseCssColorToRgba(candidate);
+          if (rgba) {
+            const hex = rgbaToHex(rgba);
+            const oklch = hexToOklch(candidate);
+            const role = classifyColorRole(prop, oklch, hasBackdrop);
+            const dedupeKey = `${role}:${hex}`;
+            if (!colorByRoleAndHex.has(dedupeKey)) {
+              colorIndex += 1;
+              const darkOklch = synthesizeDarkCounterpart(oklch, role);
+              const darkHex = oklchToHex(darkOklch);
+              colorByRoleAndHex.set(dedupeKey, {
+                name: `color-${role}-${colorIndex}`,
+                raw: candidate,
+                hex,
+                oklch,
+                relativeLuminance: computeRelativeLuminance(hex),
+                role,
+                darkCounterpartHex: darkHex,
+                darkCounterpartOklch: darkOklch
+              });
+            }
           }
         }
       }
@@ -375,12 +415,13 @@ export function extractDesignTokens(snapshot: UiReferenceSnapshot): DesignTokenS
         prop === 'row-gap' ||
         prop === 'column-gap'
       ) {
-        const firstToken = val.split(/\s+/)[0];
-        const px = parsePxValue(firstToken);
-        if (px !== null && px > 0) {
-          const sp = quantizeTo8ptGrid(px);
-          if (!spacingMap.has(sp.quantized8ptPx)) {
-            spacingMap.set(sp.quantized8ptPx, sp);
+        for (const token of val.split(/\s+/)) {
+          const px = parsePxValue(token);
+          if (px !== null && px > 0) {
+            const sp = quantizeTo8ptGrid(px);
+            if (!spacingMap.has(sp.quantized8ptPx)) {
+              spacingMap.set(sp.quantized8ptPx, sp);
+            }
           }
         }
       }

@@ -84,6 +84,28 @@ export function parseStyleDeclarations(styleText: string): Record<string, string
   return result;
 }
 
+function resolveTailwindColorToken(colorKey: string): string | undefined {
+  const bracketHex = colorKey.match(/^\[(.+)\]$/)?.[1];
+  if (bracketHex) return bracketHex;
+
+  const slashIdx = colorKey.indexOf('/');
+  if (slashIdx > 0) {
+    const baseName = colorKey.slice(0, slashIdx);
+    const alphaRaw = Number(colorKey.slice(slashIdx + 1));
+    const baseHex = TAILWIND_COLOR_MAP[baseName];
+    if (baseHex && !Number.isNaN(alphaRaw)) {
+      const hex = baseHex.slice(1);
+      const r = parseInt(hex.slice(0, 2), 16);
+      const g = parseInt(hex.slice(2, 4), 16);
+      const b = parseInt(hex.slice(4, 6), 16);
+      const alpha = Math.max(0, Math.min(1, Number((alphaRaw / 100).toFixed(2))));
+      return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+    }
+  }
+
+  return TAILWIND_COLOR_MAP[colorKey];
+}
+
 function mapTailwindTokenToDeclaration(token: string): Record<string, string> {
   const decls: Record<string, string> = {};
 
@@ -120,13 +142,11 @@ function mapTailwindTokenToDeclaration(token: string): Record<string, string> {
     }
   } else if (token.startsWith('bg-')) {
     const colorKey = token.slice(3);
-    const bracketHex = colorKey.match(/^\[(.+)\]$/)?.[1];
-    const resolved = bracketHex ?? TAILWIND_COLOR_MAP[colorKey];
+    const resolved = resolveTailwindColorToken(colorKey);
     if (resolved) decls['background-color'] = resolved;
   } else if (token.startsWith('text-')) {
     const suffix = token.slice(5);
-    const bracketVal = suffix.match(/^\[(.+)\]$/)?.[1];
-    const colorVal = bracketVal ?? TAILWIND_COLOR_MAP[suffix];
+    const colorVal = resolveTailwindColorToken(suffix);
     if (colorVal) {
       decls['color'] = colorVal;
     } else if (suffix === 'xs') decls['font-size'] = '12px';
@@ -138,8 +158,7 @@ function mapTailwindTokenToDeclaration(token: string): Record<string, string> {
     else if (suffix === '3xl') decls['font-size'] = '30px';
   } else if (token.startsWith('border-')) {
     const suffix = token.slice(7);
-    const bracketVal = suffix.match(/^\[(.+)\]$/)?.[1];
-    const colorVal = bracketVal ?? TAILWIND_COLOR_MAP[suffix];
+    const colorVal = resolveTailwindColorToken(suffix);
     if (colorVal) decls['border-color'] = colorVal;
   } else if (token.startsWith('rounded')) {
     const suffix = token === 'rounded' ? 'md' : token.slice('rounded-'.length);
@@ -209,6 +228,13 @@ function mapTailwindTokenToDeclaration(token: string): Record<string, string> {
   return decls;
 }
 
+function minWidthPxToBreakpoint(minWidthPx: number): 'sm' | 'md' | 'lg' | 'xl' {
+  if (minWidthPx >= 1280) return 'xl';
+  if (minWidthPx >= 1024) return 'lg';
+  if (minWidthPx >= 768) return 'md';
+  return 'sm';
+}
+
 function parseCssStylesheet(cssText: string): {
   rules: Record<string, Record<string, string>>;
   pseudoHooks: PseudoStateHook[];
@@ -225,7 +251,7 @@ function parseCssStylesheet(cssText: string): {
   const withoutComments = cssText.replace(/\/\*[\s\S]*?\*\//g, '');
 
   // Extract @keyframes blocks first
-  const keyframeRegex = /@keyframes\s+([a-zA-Z0-9_-]+)\s*\{([\s\S]*?\})\s*\}/g;
+  const keyframeRegex = /@keyframes\s+([a-zA-Z0-9_-]+)\s*\{((?:[^{}]|\{[^{}]*\})*)\}/g;
   let kfMatch: RegExpExecArray | null;
   while ((kfMatch = keyframeRegex.exec(withoutComments)) !== null) {
     const kfName = kfMatch[1];
@@ -244,22 +270,35 @@ function parseCssStylesheet(cssText: string): {
     keyframes[kfName] = steps;
   }
 
-  // Extract @media (prefers-color-scheme: dark) rules
-  const darkMediaRegex = /@media\s*\(\s*prefers-color-scheme\s*:\s*dark\s*\)\s*\{([\s\S]*?\})\s*\}/g;
-  let dmMatch: RegExpExecArray | null;
-  while ((dmMatch = darkMediaRegex.exec(withoutComments)) !== null) {
-    const inner = dmMatch[1] ?? '';
+  // Extract @media blocks (dark mode, responsive min-width, reduced-motion, etc.)
+  const mediaRegex = /@media\s*([^{]+)\{((?:[^{}]|\{[^{}]*\})*)\}/g;
+  let mediaMatch: RegExpExecArray | null;
+  while ((mediaMatch = mediaRegex.exec(withoutComments)) !== null) {
+    const condition = mediaMatch[1]?.trim() ?? '';
+    const inner = mediaMatch[2] ?? '';
+    const isDark = /prefers-color-scheme\s*:\s*dark/i.test(condition);
+    const minWidthMatch = condition.match(/min-width\s*:\s*([0-9.]+)px/i);
+
     const innerRuleRegex = /([^{]+)\{([^}]*)\}/g;
     let irMatch: RegExpExecArray | null;
     while ((irMatch = innerRuleRegex.exec(inner)) !== null) {
       const sel = irMatch[1]?.trim() ?? '';
       const body = irMatch[2]?.trim() ?? '';
-      if (sel && body) {
+      if (!sel || !body) continue;
+      const decls = parseStyleDeclarations(body);
+      if (isDark) {
         pseudoHooks.push({
           selector: sel,
           state: 'dark',
-          declarations: parseStyleDeclarations(body)
+          declarations: decls
         });
+      } else if (minWidthMatch?.[1]) {
+        const bp = minWidthPxToBreakpoint(Number(minWidthMatch[1]));
+        const existing = rules[sel] ?? {};
+        for (const [k, v] of Object.entries(decls)) {
+          existing[`@media-${bp}-${k}`] = v;
+        }
+        rules[sel] = existing;
       }
     }
   }
@@ -267,7 +306,7 @@ function parseCssStylesheet(cssText: string): {
   // Strip @keyframes and @media blocks before parsing standard rules
   const stripped = withoutComments
     .replace(keyframeRegex, '')
-    .replace(darkMediaRegex, '');
+    .replace(mediaRegex, '');
 
   const ruleRegex = /([^{}@]+)\{([^}]*)\}/g;
   let match: RegExpExecArray | null;
@@ -337,7 +376,8 @@ function parseAttributes(attrString: string): {
     inlineStyles = { ...inlineStyles, ...parseStyleDeclarations(jsxStyleMatch[1]) };
   }
 
-  const attrRegex = /([a-zA-Z0-9_:-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|\{([^}]*)\})/g;
+  const attrRegex =
+    /([a-zA-Z0-9_:-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|\{((?:[^{}]|\{[^{}]*\})*)\})/g;
   let m: RegExpExecArray | null;
   while ((m = attrRegex.exec(attrString)) !== null) {
     const name = m[1];
@@ -348,8 +388,10 @@ function parseAttributes(attrString: string): {
         .replace(/^['"`]|['"`]$/g, '')
         .split(/\s+/)
         .filter(Boolean);
-    } else if (name === 'style' && !jsxStyleMatch) {
-      inlineStyles = { ...inlineStyles, ...parseStyleDeclarations(val) };
+    } else if (name === 'style') {
+      if (!jsxStyleMatch) {
+        inlineStyles = { ...inlineStyles, ...parseStyleDeclarations(val) };
+      }
     } else {
       attributes[name] = val;
     }
@@ -405,7 +447,9 @@ export function captureUiReference(input: UiReferenceInput): UiReferenceSnapshot
   const stack: UiDomNode[] = [];
   const tailwindSet = new Set<string>();
 
-  const tagRegex = /<!--[\s\S]*?-->|<(\/?)([a-zA-Z][a-zA-Z0-9-]*)([^>]*?)(\/?)>/g;
+  // Quote- and brace-aware HTML/JSX tag matcher so `>` inside `onClick={() => ...}` or quotes does not truncate tags
+  const tagRegex =
+    /<!--[\s\S]*?-->|<(\/?)([a-zA-Z][a-zA-Z0-9-]*)((?:[^>"'{]|"[^"]*"|'[^']*'|\{(?:[^{}]|\{[^{}]*\})*\})*?)(\/?)>/g;
   let lastIndex = 0;
   let nodeCounter = 0;
   let match: RegExpExecArray | null;
