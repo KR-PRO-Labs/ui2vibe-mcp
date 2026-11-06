@@ -1,0 +1,54 @@
+{
+  "name": "@kr-pro-labs/ui2vibe-mcp",
+  "version": "1.0.0",
+  "description": "UI Design Token, Responsive Layout Skeleton, Motion Physics & Interactive Component Absorption MCP Server for Vibe Coding",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "ui2vibe-mcp": "./dist/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "README.ko.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "start": "node ./dist/index.js"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "ui",
+    "design-tokens",
+    "oklch",
+    "motion-physics",
+    "spring-animation",
+    "tailwind",
+    "react",
+    "wcag",
+    "vibe-coding"
+  ],
+  "author": "KR-PRO-Labs (@sjdhfjdj30-hash)",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/KR-PRO-Labs/ui2vibe-mcp.git"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.4",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.5"
+  }
+}

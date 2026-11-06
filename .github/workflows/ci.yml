@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  verify:
+    name: Build, Typecheck & Test (pve3-debian-runner)
+    runs-on: [self-hosted, Linux, X64, debian, pve3]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Verify Node.js runtime
+        run: |
+          node -v
+          npm -v
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run TypeScript strict typecheck
+        run: npm run typecheck
+
+      - name: Run Vitest unit & integration test suite
+        run: npm test
+
+      - name: Build production ESM bundle
+        run: npm run build
