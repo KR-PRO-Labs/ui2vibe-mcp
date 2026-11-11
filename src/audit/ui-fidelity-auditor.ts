@@ -112,6 +112,17 @@ export function auditUiFidelity(
     );
   }
 
+  if (motion.scrollTimelines?.length > 0) {
+    const hasSupportsCheck = motion.scrollTimelines.every((st) =>
+      st.supportsFallbackCss.includes('@supports')
+    );
+    if (!hasSupportsCheck) {
+      recommendations.push(
+        'Provide @supports (animation-timeline: view()) fallback styling for browsers lacking CSS Scroll-Driven Animations support.'
+      );
+    }
+  }
+
   const clsLayoutStable =
     Boolean(layout.root.minHeightPx || layout.root.aspectRatio) ||
     /minHeight|min-height|aspect-ratio/.test(synthesizedComponent.componentCode);

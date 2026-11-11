@@ -98,6 +98,20 @@ export interface UiReferenceInput {
   componentName?: string;
 }
 
+export interface SvgPathSnapshot {
+  id: string;
+  d: string;
+  morphTargetD?: string;
+}
+
+export interface ContainerQueryCondition {
+  containerName?: string;
+  minWidthPx?: number;
+  maxWidthPx?: number;
+  queryRaw: string;
+  declarations: Record<string, string>;
+}
+
 export interface UiReferenceSnapshot {
   componentName: string;
   sourceFramework: 'html' | 'jsx' | 'vue' | 'svelte';
@@ -107,6 +121,8 @@ export interface UiReferenceSnapshot {
   pseudoStateHooks: PseudoStateHook[];
   keyframesRaw: Record<string, Record<string, Record<string, string>>>;
   tailwindClassesDetected: string[];
+  containerQueriesDetected: string[];
+  svgPathsDetected: SvgPathSnapshot[];
 }
 
 export type SemanticLandmarkTag =
@@ -142,6 +158,11 @@ export interface LayoutSkeletonNode {
   layoutMode: 'flex' | 'grid' | 'block' | 'inline-flex';
   flexDirection?: 'row' | 'column' | 'row-reverse' | 'column-reverse';
   gridTemplateColumns?: string;
+  gridTemplateRows?: string;
+  isSubgrid?: boolean;
+  containerType?: 'normal' | 'size' | 'inline-size';
+  containerName?: string;
+  containerQueries?: ContainerQueryCondition[];
   gapPx: number;
   maxWidthPx?: number;
   minWidthPx?: number;
@@ -159,6 +180,9 @@ export interface LayoutSkeleton {
   totalOriginalNodes: number;
   totalPrunedNodes: number;
   prunedWrapperCount: number;
+  containerCount: number;
+  containerQueryCount: number;
+  subgridCount: number;
   responsiveBreakpoints: ResponsiveBreakpointRule[];
   semanticLandmarksUsed: SemanticLandmarkTag[];
 }
@@ -171,9 +195,34 @@ export interface SpringApproximation {
   settlingTimeMs: number;
 }
 
+export type ScrollTimelineAxis = 'block' | 'inline' | 'x' | 'y';
+
+export interface ScrollTimelineSpec {
+  id: string;
+  targetSelector: string;
+  type: 'view' | 'scroll';
+  axis: ScrollTimelineAxis;
+  timelineName?: string;
+  viewInset?: string;
+  rangeStart?: string;
+  rangeEnd?: string;
+  cssRule: string;
+  supportsFallbackCss: string;
+}
+
+export interface SvgMorphSpec {
+  id: string;
+  sourcePathD: string;
+  targetPathD: string;
+  interpolatedSteps: string[];
+  commandCount: number;
+  cssKeyframeAnimation: string;
+  prefersReducedMotionFallbackD: string;
+}
+
 export interface MotionSpec {
   id: string;
-  trigger: 'hover' | 'focus' | 'active' | 'mount' | 'scroll' | 'keyframe';
+  trigger: 'hover' | 'focus' | 'active' | 'mount' | 'scroll' | 'keyframe' | 'scroll-timeline' | 'svg-morph';
   property: string;
   durationMs: number;
   easingCss: string;
@@ -193,6 +242,8 @@ export interface KeyframeAnimationSpec {
 export interface MotionPhysicsReport {
   motions: MotionSpec[];
   keyframes: KeyframeAnimationSpec[];
+  scrollTimelines: ScrollTimelineSpec[];
+  svgMorphs: SvgMorphSpec[];
   reducedMotionCssFallback: string;
 }
 

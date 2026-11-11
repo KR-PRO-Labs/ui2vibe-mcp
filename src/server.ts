@@ -31,12 +31,12 @@ const SynthesizeInputSchema = ReferenceInputSchema.extend({
 
 export const UI_ABSORPTION_WORKFLOW_GUIDE = `# UI2Vibe Absorption Workflow Guide
 
-1. **Capture (\`capture_ui_reference\`)**: Feed any reference HTML/JSX/Vue snippet and CSS rules into the normalizer to inspect DOM hierarchy and pseudo-state hooks (\`:hover\`, \`:focus-visible\`, \`:active\`, dark mode).
+1. **Capture (\`capture_ui_reference\`)**: Feed any reference HTML/JSX/Vue snippet, SVG markup, and CSS rules into the normalizer to inspect DOM hierarchy, container queries (\`@container\`), subgrid declarations, SVG paths, and pseudo-state hooks (\`:hover\`, \`:focus-visible\`, \`:active\`, dark mode).
 2. **Tokenize (\`extract_design_tokens\`)**: Convert sRGB/Hex/HSL colors into perceptual OKLCH space, auto-synthesize dark mode counterparts, and quantize spacing to an 8pt grid.
-3. **Decompose (\`decompose_layout_skeleton\`)**: Collapse redundant wrapper \`div\` chains into semantic HTML5 landmarks (\`header\`, \`nav\`, \`main\`, \`section\`, \`article\`, \`aside\`, \`footer\`).
-4. **Extract Physics (\`extract_motion_physics\`)**: Solve physical harmonic oscillator spring parameters (\`stiffness\`, \`damping\`, \`mass\`) from \`cubic-bezier\` transitions and \`@keyframes\`.
-5. **Synthesize (\`synthesize_vibe_component\`)**: Emit a zero-dependency component for \`react-tailwind\`, \`react-css-vars\`, \`vanilla-css\`, \`vue-tailwind\`, or \`svelte-css\`.
-6. **Audit (\`audit_ui_fidelity\`)**: Verify WCAG 2.1 AA/AAA contrast ratios, >=44x44px touch targets, \`prefers-reduced-motion\` fallbacks, and CLS layout stability.
+3. **Decompose (\`decompose_layout_skeleton\`)**: Collapse redundant wrapper \`div\` chains into semantic HTML5 landmarks (\`header\`, \`nav\`, \`main\`, \`section\`, \`article\`, \`aside\`, \`footer\`), resolving container query boundaries and CSS Subgrid axes.
+4. **Extract Physics (\`extract_motion_physics\`)**: Solve physical harmonic oscillator spring parameters (\`stiffness\`, \`damping\`, \`mass\`) from \`cubic-bezier\` transitions, extract scroll-driven timelines (\`animation-timeline: view()\`), and synthesize SVG path morphing (\`d: path(...)\`) with normalized cubic bezier commands.
+5. **Synthesize (\`synthesize_vibe_component\`)**: Emit a zero-dependency component for \`react-tailwind\`, \`react-css-vars\`, \`vanilla-css\`, \`vue-tailwind\`, or \`svelte-css\` with container query classes and scroll timeline fallbacks.
+6. **Audit (\`audit_ui_fidelity\`)**: Verify WCAG 2.1 AA/AAA contrast ratios, >=44x44px touch targets, \`prefers-reduced-motion\` fallbacks, \`@supports\` scroll-timeline fallbacks, and CLS layout stability.
 `;
 
 export function executeUi2VibeTool(

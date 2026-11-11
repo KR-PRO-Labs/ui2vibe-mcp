@@ -126,6 +126,29 @@ export function synthesizeVibeComponent(
       ].join('\n')
     : '';
 
+  const scrollTimelineBlocks = motion.scrollTimelines?.map((s) => s.supportsFallbackCss).join('\n\n') ?? '';
+  const svgMorphBlocks = motion.svgMorphs?.map((m) => m.cssKeyframeAnimation).join('\n\n') ?? '';
+
+  const containerCssBlocks: string[] = [];
+  function collectContainerCss(node: LayoutSkeletonNode): void {
+    if (node.containerQueries) {
+      for (const cq of node.containerQueries) {
+        const declLines = Object.entries(cq.declarations)
+          .map(([k, v]) => `    ${k}: ${v};`)
+          .join('\n');
+        const cond = cq.containerName
+          ? `@container ${cq.containerName} ${cq.queryRaw.replace(cq.containerName, '').trim()}`
+          : `@container ${cq.queryRaw}`;
+        containerCssBlocks.push(`${cond} {\n  [data-node-id="${node.id}"] {\n${declLines}\n  }\n}`);
+      }
+    }
+    for (const child of node.children) {
+      collectContainerCss(child);
+    }
+  }
+  collectContainerCss(layout.root);
+  const containerQueryCss = containerCssBlocks.join('\n\n');
+
   const themeCssVariables = [
     baseCssVarsBlock,
     ':root {',
@@ -137,6 +160,9 @@ export function synthesizeVibeComponent(
     '}',
     darkActiveBlock,
     keyframeBlocks,
+    svgMorphBlocks,
+    scrollTimelineBlocks,
+    containerQueryCss,
     motion.reducedMotionCssFallback
   ]
     .filter(Boolean)
@@ -161,6 +187,13 @@ export function synthesizeVibeComponent(
         colors: tailwindColors,
         spacing: tailwindSpacing,
         borderRadius: tailwindRadii,
+        containers: {
+          'xs': '20rem',
+          'sm': '24rem',
+          'md': '28rem',
+          'lg': '32rem',
+          'xl': '36rem'
+        },
         transitionTimingFunction: {
           'vibe-spring': primaryMotion.easingCss
         },
@@ -172,12 +205,22 @@ export function synthesizeVibeComponent(
   };
 
   const rootTag = layout.root.semanticTag;
-  const layoutClass =
+  const containerClass = layout.root.containerType
+    ? layout.root.containerName
+      ? `@container/${layout.root.containerName}`
+      : '@container'
+    : '';
+  const subgridClass = layout.root.isSubgrid ? 'grid-cols-subgrid' : '';
+  const layoutClass = [
+    containerClass,
     layout.root.layoutMode === 'grid'
-      ? 'grid gap-4'
+      ? subgridClass ? `grid ${subgridClass} gap-4` : 'grid gap-4'
       : layout.root.flexDirection === 'column'
         ? 'flex flex-col gap-4'
-        : 'flex flex-row items-center gap-4';
+        : 'flex flex-row items-center gap-4'
+  ]
+    .filter(Boolean)
+    .join(' ');
 
   let componentCode = '';
 

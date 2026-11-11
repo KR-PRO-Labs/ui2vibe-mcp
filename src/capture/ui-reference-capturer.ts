@@ -1,6 +1,7 @@
 import type {
   PseudoStateHook,
   PseudoStateType,
+  SvgPathSnapshot,
   UiDomNode,
   UiReferenceInput,
   UiReferenceSnapshot
@@ -115,11 +116,40 @@ function mapTailwindTokenToDeclaration(token: string): Record<string, string> {
   else if (token === 'block') decls['display'] = 'block';
   else if (token === 'flex-col') decls['flex-direction'] = 'column';
   else if (token === 'flex-row') decls['flex-direction'] = 'row';
-  else if (token.startsWith('grid-cols-')) {
+  else if (token === 'grid-cols-subgrid') {
+    decls['display'] = 'grid';
+    decls['grid-template-columns'] = 'subgrid';
+  } else if (token === 'grid-rows-subgrid') {
+    decls['display'] = 'grid';
+    decls['grid-template-rows'] = 'subgrid';
+  } else if (token === 'col-span-full') {
+    decls['grid-column'] = '1 / -1';
+  } else if (token === 'row-span-full') {
+    decls['grid-row'] = '1 / -1';
+  } else if (token.startsWith('col-span-')) {
+    decls['grid-column'] = `span ${token.slice('col-span-'.length)}`;
+  } else if (token.startsWith('row-span-')) {
+    decls['grid-row'] = `span ${token.slice('row-span-'.length)}`;
+  } else if (token === '@container') {
+    decls['container-type'] = 'inline-size';
+  } else if (token === '@container-normal') {
+    decls['container-type'] = 'normal';
+  } else if (token === '@container-size') {
+    decls['container-type'] = 'size';
+  } else if (token.startsWith('@container/')) {
+    decls['container-type'] = 'inline-size';
+    decls['container-name'] = token.slice('@container/'.length);
+  } else if (token.startsWith('grid-cols-')) {
     const count = Number(token.slice('grid-cols-'.length));
     if (!Number.isNaN(count) && count > 0) {
       decls['display'] = 'grid';
       decls['grid-template-columns'] = `repeat(${count}, minmax(0, 1fr))`;
+    }
+  } else if (token.startsWith('grid-rows-')) {
+    const count = Number(token.slice('grid-rows-'.length));
+    if (!Number.isNaN(count) && count > 0) {
+      decls['display'] = 'grid';
+      decls['grid-template-rows'] = `repeat(${count}, minmax(0, 1fr))`;
     }
   } else if (token.startsWith('gap-')) {
     const key = token.slice('gap-'.length);
@@ -239,13 +269,15 @@ function parseCssStylesheet(cssText: string): {
   rules: Record<string, Record<string, string>>;
   pseudoHooks: PseudoStateHook[];
   keyframes: Record<string, Record<string, Record<string, string>>>;
+  containerQueries: string[];
 } {
   const rules: Record<string, Record<string, string>> = {};
   const pseudoHooks: PseudoStateHook[] = [];
   const keyframes: Record<string, Record<string, Record<string, string>>> = {};
+  const containerQueries: string[] = [];
 
   if (!cssText) {
-    return { rules, pseudoHooks, keyframes };
+    return { rules, pseudoHooks, keyframes, containerQueries };
   }
 
   const withoutComments = cssText.replace(/\/\*[\s\S]*?\*\//g, '');
@@ -303,10 +335,69 @@ function parseCssStylesheet(cssText: string): {
     }
   }
 
-  // Strip @keyframes and @media blocks before parsing standard rules
+  // Extract @container blocks
+  const containerRegex = /@container\s*([^{]*)\{((?:[^{}]|\{[^{}]*\})*)\}/g;
+  let containerMatch: RegExpExecArray | null;
+  while ((containerMatch = containerRegex.exec(withoutComments)) !== null) {
+    const rawCondition = containerMatch[1]?.trim() ?? '';
+    const inner = containerMatch[2] ?? '';
+    containerQueries.push(rawCondition || 'inline-size');
+
+    const nameMatch = rawCondition.match(/^([a-zA-Z0-9_-]+)\s*\(/);
+    const containerName = nameMatch?.[1];
+    const minWidthMatch = rawCondition.match(/min-width\s*:\s*([0-9.]+)(px|rem)?/i);
+    let minWidthPx: number | undefined;
+    if (minWidthMatch?.[1]) {
+      const val = parseFloat(minWidthMatch[1]);
+      const unit = minWidthMatch[2] ?? 'px';
+      minWidthPx = unit === 'rem' ? Math.round(val * 16) : Math.round(val);
+    }
+
+    const innerRuleRegex = /([^{]+)\{([^}]*)\}/g;
+    let irMatch: RegExpExecArray | null;
+    while ((irMatch = innerRuleRegex.exec(inner)) !== null) {
+      const sel = irMatch[1]?.trim() ?? '';
+      const body = irMatch[2]?.trim() ?? '';
+      if (!sel || !body) continue;
+      const decls = parseStyleDeclarations(body);
+      const existing = rules[sel] ?? {};
+      const namePrefix = containerName ? `${containerName}-` : '';
+      const widthPrefix = minWidthPx !== undefined ? `${minWidthPx}px-` : '';
+      for (const [k, v] of Object.entries(decls)) {
+        existing[`@container-${namePrefix}${widthPrefix}${k}`] = v;
+      }
+      rules[sel] = existing;
+    }
+  }
+
+  // Extract @supports blocks
+  const supportsRegex = /@supports\s*([^{]+)\{((?:[^{}]|\{[^{}]*\})*)\}/g;
+  let supMatch: RegExpExecArray | null;
+  while ((supMatch = supportsRegex.exec(withoutComments)) !== null) {
+    const condition = supMatch[1]?.trim() ?? '';
+    const inner = supMatch[2] ?? '';
+    const innerRuleRegex = /([^{]+)\{([^}]*)\}/g;
+    let irMatch: RegExpExecArray | null;
+    while ((irMatch = innerRuleRegex.exec(inner)) !== null) {
+      const sel = irMatch[1]?.trim() ?? '';
+      const body = irMatch[2]?.trim() ?? '';
+      if (!sel || !body) continue;
+      const decls = parseStyleDeclarations(body);
+      const existing = rules[sel] ?? {};
+      for (const [k, v] of Object.entries(decls)) {
+        existing[k] = v;
+        existing[`@supports-${k}`] = `${condition} => ${v}`;
+      }
+      rules[sel] = existing;
+    }
+  }
+
+  // Strip @keyframes, @media, @container, and @supports blocks before parsing standard rules
   const stripped = withoutComments
     .replace(keyframeRegex, '')
-    .replace(mediaRegex, '');
+    .replace(mediaRegex, '')
+    .replace(containerRegex, '')
+    .replace(supportsRegex, '');
 
   const ruleRegex = /([^{}@]+)\{([^}]*)\}/g;
   let match: RegExpExecArray | null;
@@ -354,7 +445,7 @@ function parseCssStylesheet(cssText: string): {
     }
   }
 
-  return { rules, pseudoHooks, keyframes };
+  return { rules, pseudoHooks, keyframes, containerQueries };
 }
 
 function parseAttributes(attrString: string): {
@@ -440,7 +531,46 @@ export function captureUiReference(input: UiReferenceInput): UiReferenceSnapshot
     detectedFramework = input.sourceFrameworkHint ?? 'jsx';
   }
 
-  const { rules: rawCssRules, pseudoHooks, keyframes } = parseCssStylesheet(embeddedCss);
+  const { rules: rawCssRules, pseudoHooks, keyframes, containerQueries } = parseCssStylesheet(embeddedCss);
+
+  const svgPathsDetected: SvgPathSnapshot[] = [];
+  const pathRegex = /<path\b([^>]*)>/gi;
+  let pathMatch: RegExpExecArray | null;
+  let pathCount = 0;
+  while ((pathMatch = pathRegex.exec(rawMarkup)) !== null) {
+    const attrStr = pathMatch[1] ?? '';
+    const { attributes } = parseAttributes(attrStr);
+    const d = attributes['d'] ?? '';
+    if (d) {
+      pathCount += 1;
+      const pathId = attributes['id'] ?? `svg-path-${pathCount}`;
+      const morphTargetD =
+        attributes['data-morph-to'] ??
+        attributes['data-morph-target'] ??
+        attributes['data-target-d'];
+      svgPathsDetected.push({
+        id: pathId,
+        d,
+        morphTargetD
+      });
+    }
+  }
+
+  // Also check if any keyframes animate SVG path "d" property:
+  for (const [kfName, steps] of Object.entries(keyframes)) {
+    const fromD = steps['0%']?.['d'] ?? steps['from']?.['d'];
+    const toD = steps['100%']?.['d'] ?? steps['to']?.['d'];
+    if (fromD && toD) {
+      const cleanFrom = fromD.replace(/^path\(['"]?|['"]?\)$/g, '');
+      const cleanTo = toD.replace(/^path\(['"]?|['"]?\)$/g, '');
+      pathCount += 1;
+      svgPathsDetected.push({
+        id: `kf-morph-${pathCount}`,
+        d: cleanFrom,
+        morphTargetD: cleanTo
+      });
+    }
+  }
 
   const rootNodes: UiDomNode[] = [];
   const flatNodes: UiDomNode[] = [];
@@ -529,6 +659,20 @@ export function captureUiReference(input: UiReferenceInput): UiReferenceSnapshot
         for (const [k, v] of Object.entries(mapped)) {
           computedStyles[`@media-${bp}-${k}`] = v;
         }
+      } else if (cls.startsWith('@')) {
+        containerQueries.push(cls);
+        if (cls === '@container' || cls.startsWith('@container-') || cls.startsWith('@container/')) {
+          const mapped = mapTailwindTokenToDeclaration(cls);
+          Object.assign(computedStyles, mapped);
+        } else if (cls.includes(':')) {
+          const colonIdx = cls.indexOf(':');
+          const prefix = cls.slice(0, colonIdx);
+          const utility = cls.slice(colonIdx + 1);
+          const mapped = mapTailwindTokenToDeclaration(utility);
+          for (const [k, v] of Object.entries(mapped)) {
+            computedStyles[`@container-${prefix.slice(1)}-${k}`] = v;
+          }
+        }
       } else {
         Object.assign(computedStyles, mapTailwindTokenToDeclaration(cls));
       }
@@ -575,6 +719,8 @@ export function captureUiReference(input: UiReferenceInput): UiReferenceSnapshot
     rawCssRules,
     pseudoStateHooks: pseudoHooks,
     keyframesRaw: keyframes,
-    tailwindClassesDetected: Array.from(tailwindSet)
+    tailwindClassesDetected: Array.from(tailwindSet),
+    containerQueriesDetected: Array.from(new Set(containerQueries)),
+    svgPathsDetected
   };
 }

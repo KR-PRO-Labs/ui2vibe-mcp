@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   auditUiFidelity,
+  buildSvgMorphSpec,
   captureUiReference,
   computeContrastRatio,
   computeRelativeLuminance,
@@ -11,7 +12,9 @@ import {
   extractDesignTokens,
   extractMotionPhysics,
   hexToOklch,
+  interpolateNormalizedCommands,
   oklchToHex,
+  parseAndNormalizeSvgPath,
   quantizeTo8ptGrid,
   readUi2VibeResource,
   solveSpringFromCubicBezier,
@@ -312,5 +315,137 @@ describe('@kr-pro-labs/ui2vibe-mcp Core Pipeline & Edge Cases', () => {
 
     expect(() => executeUi2VibeTool('non_existent_tool', {})).toThrow(/Unknown tool/);
     expect(() => readUi2VibeResource('ui2vibe://unknown')).toThrow(/Unknown resource URI/);
+  });
+
+  it('9. extracts Container Queries (@container) and CSS Subgrid layout skeletons across CSS and Tailwind', () => {
+    const markup = `
+      <div class="@container @container/sidebar flex flex-col p-4 bg-slate-900">
+        <aside class="col-span-full @md:grid-cols-2 @lg:flex-row">
+          <div class="grid grid-cols-subgrid gap-2">
+            <span class="p-2 text-white">Subgrid Item A</span>
+            <span class="p-2 text-slate-400">Subgrid Item B</span>
+          </div>
+        </aside>
+      </div>
+    `;
+
+    const css = `
+      @container (min-width: 480px) {
+        .col-span-full {
+          display: grid;
+          gap: 16px;
+        }
+      }
+      @container sidebar (min-width: 30rem) {
+        .grid-cols-subgrid {
+          grid-template-columns: subgrid;
+          grid-template-rows: subgrid;
+        }
+      }
+    `;
+
+    const snap = captureUiReference({ markup, css, componentName: 'ContainerSubgridCard' });
+    expect(snap.containerQueriesDetected.length).toBeGreaterThanOrEqual(2);
+    expect(snap.tailwindClassesDetected).toContain('@container');
+    expect(snap.tailwindClassesDetected).toContain('@container/sidebar');
+    expect(snap.tailwindClassesDetected).toContain('grid-cols-subgrid');
+
+    const layout = decomposeLayoutSkeleton(snap);
+    expect(layout.containerCount).toBeGreaterThanOrEqual(1);
+    expect(layout.subgridCount).toBeGreaterThanOrEqual(1);
+    expect(layout.root.containerType).toBe('inline-size');
+    expect(layout.root.containerName).toBe('sidebar');
+
+    const tokens = extractDesignTokens(snap);
+    const motion = extractMotionPhysics(snap);
+    const synth = synthesizeVibeComponent(snap, tokens, layout, motion, {
+      targetFramework: 'react-tailwind'
+    });
+
+    expect(synth.tailwindConfigExtension.theme).toHaveProperty('extend.containers');
+    expect(synth.componentCode).toContain('@container/sidebar');
+    expect(synth.themeCssVariables).toContain('@container');
+
+    const synthVanilla = synthesizeVibeComponent(snap, tokens, layout, motion, {
+      targetFramework: 'vanilla-css'
+    });
+    expect(synthVanilla.themeCssVariables).toContain('@container');
+  });
+
+  it('10. extracts Scroll-Driven Timelines (animation-timeline: view()) and normalizes SVG Path Morphing curves', () => {
+    const markup = `
+      <section class="scroll-wrapper p-8 bg-slate-950">
+        <div class="scroll-card p-6 bg-slate-900 rounded-2xl">
+          <svg viewBox="0 0 100 100" class="w-12 h-12 text-slate-200" aria-hidden="true">
+            <path
+              id="shapeMorph"
+              d="M 10 10 L 90 10 L 90 90 L 10 90 Z"
+              data-morph-to="M 50 10 L 90 90 L 10 90 Z"
+            />
+          </svg>
+          <h3 class="text-xl font-bold text-white">Scroll Parallax & Morph</h3>
+          <button type="button" class="min-w-[48px] min-h-[48px] px-6 py-3 bg-indigo-600 text-white rounded-xl">
+            Explore Parallax
+          </button>
+        </div>
+      </section>
+    `;
+
+    const css = `
+      .scroll-card {
+        animation: revealCard linear both;
+        animation-timeline: view(block);
+        animation-range: entry 0% cover 50%;
+      }
+      @keyframes revealCard {
+        0% { opacity: 0; transform: translateY(32px) scale(0.96); }
+        100% { opacity: 1; transform: translateY(0) scale(1); }
+      }
+    `;
+
+    const snap = captureUiReference({ markup, css, componentName: 'ScrollMorphHero' });
+    expect(snap.svgPathsDetected.length).toBe(1);
+    expect(snap.svgPathsDetected[0]?.id).toBe('shapeMorph');
+    expect(snap.svgPathsDetected[0]?.morphTargetD).toBe('M 50 10 L 90 90 L 10 90 Z');
+
+    const motion = extractMotionPhysics(snap);
+    expect(motion.scrollTimelines.length).toBeGreaterThanOrEqual(1);
+    const st = motion.scrollTimelines[0]!;
+    expect(st.type).toBe('view');
+    expect(st.axis).toBe('block');
+    expect(st.rangeStart).toBe('entry 0%');
+    expect(st.rangeEnd).toBe('cover 50%');
+    expect(st.supportsFallbackCss).toContain('@supports (animation-timeline: view())');
+    expect(st.supportsFallbackCss).toContain('@supports not (animation-timeline: view())');
+
+    expect(motion.svgMorphs.length).toBe(1);
+    const morph = motion.svgMorphs[0]!;
+    expect(morph.commandCount).toBeGreaterThanOrEqual(4);
+    expect(morph.interpolatedSteps.length).toBe(5);
+    expect(morph.cssKeyframeAnimation).toContain('@keyframes morph_');
+    expect(morph.cssKeyframeAnimation).toContain("d: path('M");
+
+    // Test raw SVG normalizer helpers directly
+    const squareCommands = parseAndNormalizeSvgPath('M 0 0 L 100 0 L 100 100 Z');
+    const triangleCommands = parseAndNormalizeSvgPath('M 50 0 L 100 100 L 0 100 Z');
+    expect(squareCommands.length).toBe(4);
+    expect(triangleCommands.length).toBe(4);
+    const midpointD = interpolateNormalizedCommands(squareCommands, triangleCommands, 0.5);
+    expect(midpointD).toContain('M 25 0');
+
+    const directMorphSpec = buildSvgMorphSpec('directTest', 'M 0 0 L 10 0 Z', 'M 0 0 L 20 20 Z');
+    expect(directMorphSpec.interpolatedSteps.length).toBe(5);
+
+    const tokens = extractDesignTokens(snap);
+    const layout = decomposeLayoutSkeleton(snap);
+    const synth = synthesizeVibeComponent(snap, tokens, layout, motion, {
+      targetFramework: 'react-tailwind'
+    });
+    expect(synth.themeCssVariables).toContain('animation-timeline: view(block)');
+    expect(synth.themeCssVariables).toContain('@keyframes morph_');
+
+    const audit = auditUiFidelity(tokens, layout, motion, synth);
+    expect(audit.hasReducedMotionFallback).toBe(true);
+    expect(audit.fidelityScore).toBeGreaterThanOrEqual(80);
   });
 });

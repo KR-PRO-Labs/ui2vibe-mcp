@@ -12,10 +12,10 @@
 **`ui2vibe-mcp`**는 **[KR-PRO-Labs](https://github.com/KR-PRO-Labs)** (`@sjdhfjdj30-hash`)에서 개발한 차세대 프론트엔드 역설계 및 디자인 흡수 전용 Model Context Protocol (MCP) 서버입니다. [`clonevibe-mcp`](https://github.com/KR-PRO-Labs/clonevibe-mcp)가 백엔드/코어 알고리즘 엔진을 레퍼런스로부터 추출·이식한다면, **`ui2vibe-mcp`**는 모든 UI 레퍼런스(HTML/CSS/Tailwind 스니펫, React JSX/TSX, Vue SFC, 또는 DOM 스타일 덤프)로부터 시각적·물리적 본질을 추출하여 내 프로젝트에 무의존성으로 정밀 이식합니다:
 
 1. **지각적 디자인 토큰 추출 (`extract_design_tokens`)**: sRGB/Hex/HSL 색상을 지각 균일 색공간인 **OKLCH**로 변환하고, 상대 휘도($L$) 기반 다크/라이트 모드 대칭 토큰 자동 합성, 8pt 그리드 여백 양자화, 타이포그래피 스케일 및 다중 레이어 그림자·글래스모피즘 토큰을 추출합니다.
-2. **시맨틱 반응형 레이아웃 골격 분해 (`decompose_layout_skeleton`)**: 불필요하게 중첩된 래퍼 `div` 체인("div-soup")을 제거하여 시맨틱 HTML5 랜드마크(`header`, `nav`, `main`, `section`, `article`, `aside`, `footer`)로 정제하고 Flex/CSS Grid 축 및 반응형 브레이크포인트(`sm`, `md`, `lg`, `xl`)를 도출합니다.
-3. **모션 물리 방정식 역산 (`extract_motion_physics`)**: CSS `transition`, `@keyframes`, `cubic-bezier(x1, y1, x2, y2)` 및 Tailwind 트랜지션 유틸리티를 분석하여 외부 애니메이션 라이브러리 없이도 물리적 스프링 계수(`stiffness`, `damping`, `mass`, `settlingTimeMs`)를 역산합니다.
-4. **카멜레온 멀티 프레임워크 컴포넌트 합성 (`synthesize_vibe_component`)**: 호스트 프로젝트의 UI 스택(`react-tailwind`, `react-css-vars`, `vanilla-css`, `vue-tailwind`, `svelte-css`)에 맞춰 `:root`/`.dark` CSS 변수 테마 블록과 무의존성 인터랙티브 컴포넌트 코드를 즉각 생성합니다.
-5. **WCAG 접근성 및 시각 정합성 감사 (`audit_ui_fidelity`)**: 모든 전경/배경 조합의 **WCAG 2.1 명암비**($CR = (L_1 + 0.05)/(L_2 + 0.05)$), 최소 터치 타겟(`44x44px`), `@media (prefers-reduced-motion: reduce)` 접근성 가드레일, CLS 레이아웃 안정성을 수학적으로 검증합니다.
+2. **시맨틱 반응형·컨테이너 쿼리 레이아웃 골격 분해 (`decompose_layout_skeleton`)**: 불필요하게 중첩된 래퍼 `div` 체인("div-soup")을 제거하여 시맨틱 HTML5 랜드마크(`header`, `nav`, `main`, `section`, `article`, `aside`, `footer`)로 정제하고 Flex/CSS Grid 축, 반응형 브레이크포인트(`sm`, `md`, `lg`, `xl`), 컨테이너 쿼리(`@container`) 및 CSS Subgrid 상속 구조를 도출합니다.
+3. **모션 물리 방정식 및 스크롤 타임라인 역산 (`extract_motion_physics`)**: CSS `transition`, `@keyframes`, `cubic-bezier(x1, y1, x2, y2)` 및 Tailwind 트랜지션 유틸리티로부터 물리적 스프링 계수(`stiffness`, `damping`, `mass`)를 역산하고, 최신 스크롤 기반 타임라인(`animation-timeline: view()`) 및 3차 베지어 정규화 기반 SVG 패스 모핑(`d: path(...)`)을 추출합니다.
+4. **카멜레온 멀티 프레임워크 컴포넌트 합성 (`synthesize_vibe_component`)**: 호스트 프로젝트의 UI 스택(`react-tailwind`, `react-css-vars`, `vanilla-css`, `vue-tailwind`, `svelte-css`)에 맞춰 컨테이너 쿼리 클래스, Subgrid 스타일, `:root`/`.dark` CSS 변수 테마 블록과 무의존성 인터랙티브 컴포넌트 코드를 즉각 생성합니다.
+5. **WCAG 접근성 및 시각 정합성 감사 (`audit_ui_fidelity`)**: 모든 전경/배경 조합의 **WCAG 2.1 명암비**($CR = (L_1 + 0.05)/(L_2 + 0.05)$), 최소 터치 타겟(`44x44px`), `@media (prefers-reduced-motion: reduce)` 접근성 가드레일, `@supports` 스크롤 타임라인 점진적 향상(Progressive Enhancement) 가드레일, CLS 레이아웃 안정성을 수학적으로 검증합니다.
 
 ---
 

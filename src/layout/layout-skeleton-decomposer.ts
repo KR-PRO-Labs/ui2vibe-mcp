@@ -1,4 +1,5 @@
 import type {
+  ContainerQueryCondition,
   LayoutSkeleton,
   LayoutSkeletonNode,
   ResponsiveBreakpointRule,
@@ -125,10 +126,69 @@ function extractResponsiveRules(computedStyles: Record<string, string>): Respons
   return rules.sort((a, b) => a.minWidthPx - b.minWidthPx);
 }
 
+function extractContainerQueries(computedStyles: Record<string, string>): ContainerQueryCondition[] {
+  const byCondition = new Map<
+    string,
+    {
+      containerName?: string;
+      minWidthPx?: number;
+      maxWidthPx?: number;
+      declarations: Record<string, string>;
+    }
+  >();
+
+  for (const [k, v] of Object.entries(computedStyles)) {
+    const match = k.match(/^@container(?:-([a-zA-Z0-9_-]+?))?(?:-([0-9]+)px)?-(.+)$/);
+    if (match) {
+      const nameOrBp = match[1];
+      const explicitPx = match[2];
+      const prop = match[3];
+      if (!prop) continue;
+
+      let minWidthPx: number | undefined = explicitPx ? Number(explicitPx) : undefined;
+      let containerName: string | undefined;
+
+      if (nameOrBp === 'sm') minWidthPx = BREAKPOINT_WIDTHS.sm;
+      else if (nameOrBp === 'md') minWidthPx = BREAKPOINT_WIDTHS.md;
+      else if (nameOrBp === 'lg') minWidthPx = BREAKPOINT_WIDTHS.lg;
+      else if (nameOrBp === 'xl') minWidthPx = BREAKPOINT_WIDTHS.xl;
+      else if (nameOrBp && nameOrBp !== 'normal' && nameOrBp !== 'size' && nameOrBp !== 'inline') {
+        containerName = nameOrBp;
+      }
+
+      const condKey = `${containerName ?? '*'}|${minWidthPx ?? '*'}`;
+      const existing = byCondition.get(condKey) ?? {
+        containerName,
+        minWidthPx,
+        declarations: {}
+      };
+      existing.declarations[prop] = v;
+      byCondition.set(condKey, existing);
+    }
+  }
+
+  const list: ContainerQueryCondition[] = [];
+  for (const item of byCondition.values()) {
+    const queryParts: string[] = [];
+    if (item.containerName) queryParts.push(item.containerName);
+    if (item.minWidthPx !== undefined) queryParts.push(`(min-width: ${item.minWidthPx}px)`);
+    list.push({
+      containerName: item.containerName,
+      minWidthPx: item.minWidthPx,
+      queryRaw: queryParts.length > 0 ? queryParts.join(' ') : 'inline-size',
+      declarations: item.declarations
+    });
+  }
+  return list;
+}
+
 export function decomposeLayoutSkeleton(snapshot: UiReferenceSnapshot): LayoutSkeleton {
   const landmarksUsed = new Set<SemanticLandmarkTag>();
   const allBreakpoints: ResponsiveBreakpointRule[] = [];
   let prunedWrapperCount = 0;
+  let containerCount = 0;
+  let containerQueryCount = 0;
+  let subgridCount = 0;
 
   function transformNode(rawNode: UiDomNode, isRoot: boolean): LayoutSkeletonNode {
     let current = rawNode;
@@ -169,6 +229,35 @@ export function decomposeLayoutSkeleton(snapshot: UiReferenceSnapshot): LayoutSk
           ? 'row'
           : undefined;
 
+    const containerTypeRaw = current.computedStyles['container-type'];
+    const containerType =
+      containerTypeRaw === 'inline-size' || containerTypeRaw === 'size' || containerTypeRaw === 'normal'
+        ? containerTypeRaw
+        : current.classes.some((c) => c === '@container' || c.startsWith('@container/'))
+          ? 'inline-size'
+          : undefined;
+
+    const containerName =
+      current.computedStyles['container-name'] ||
+      current.classes.find((c) => c.startsWith('@container/'))?.slice('@container/'.length);
+
+    if (containerType) {
+      containerCount += 1;
+    }
+
+    const gridCols = current.computedStyles['grid-template-columns'];
+    const gridRows = current.computedStyles['grid-template-rows'];
+    const isSubgrid = gridCols === 'subgrid' || gridRows === 'subgrid';
+    if (isSubgrid) {
+      subgridCount += 1;
+      layoutMode = 'grid';
+    }
+
+    const containerQueries = extractContainerQueries(current.computedStyles);
+    if (containerQueries.length > 0) {
+      containerQueryCount += containerQueries.length;
+    }
+
     const gapPx = parseNumericPx(current.computedStyles['gap']) ?? 0;
     const maxWidthPx = parseNumericPx(current.computedStyles['max-width']);
     const isInteractive =
@@ -199,7 +288,12 @@ export function decomposeLayoutSkeleton(snapshot: UiReferenceSnapshot): LayoutSk
       collapsedWrapperCount: collapsed,
       layoutMode,
       flexDirection,
-      gridTemplateColumns: current.computedStyles['grid-template-columns'],
+      gridTemplateColumns: gridCols,
+      gridTemplateRows: gridRows,
+      isSubgrid: isSubgrid ? true : undefined,
+      containerType,
+      containerName,
+      containerQueries: containerQueries.length > 0 ? containerQueries : undefined,
       gapPx,
       maxWidthPx,
       minWidthPx,
@@ -259,6 +353,9 @@ export function decomposeLayoutSkeleton(snapshot: UiReferenceSnapshot): LayoutSk
     totalOriginalNodes: snapshot.flatNodes.length,
     totalPrunedNodes,
     prunedWrapperCount,
+    containerCount,
+    containerQueryCount,
+    subgridCount,
     responsiveBreakpoints: allBreakpoints,
     semanticLandmarksUsed: Array.from(landmarksUsed)
   };
